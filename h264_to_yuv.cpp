@@ -1,43 +1,13 @@
 ﻿#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-extern "C"
-{
+extern "C" {
 #include <libavcodec/avcodec.h>
 }
 #include <memory>
 
 
 #define INBUF_SIZE 4096
-
-static void encode(AVCodecContext *enc_ctx, AVFrame *frame, AVPacket *pkt)
-{
-    int ret;
-
-    /* send the frame to the encoder */
-    //if (frame)
-    //    printf("Send frame %3"PRId64"\n", frame->pts);
-
-    ret = avcodec_send_frame(enc_ctx, frame);
-    if (ret < 0) {
-        fprintf(stderr, "Error sending a frame for encoding\n");
-        exit(1);
-    }
-
-    while (ret >= 0) {
-        ret = avcodec_receive_packet(enc_ctx, pkt);
-        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-            return;
-        else if (ret < 0) {
-            fprintf(stderr, "Error during encoding\n");
-            exit(1);
-        }
-
-        //printf("Write packet %3"PRId64" (size=%5d)\n", pkt->pts, pkt->size);
-        //fwrite(pkt->data, 1, pkt->size, outfile);
-        av_packet_unref(pkt);
-    }
-}
 
 
 static void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVPacket *pkt, const char *filename)
@@ -95,17 +65,14 @@ static void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVPacket *pkt, const
         //    fwrite(frame->data[2] + frame->linesize[2] * i, 1, frame->width / 2, fp_out);
         //}
 
-        fwrite(yuv_data.get(), yuv_size, 1, fp_out);
+        fwrite(yuv_data.get(), 1, yuv_size, fp_out);
         fclose(fp_out);
-
-        AVPacket *pkt2 = av_packet_alloc();
-        encode(dec_ctx, frame, pkt2);
     }
 }
 
 int main(int argc, char **argv)
 {
-    const char *filename = "111.h264";
+    const char *filename = "oceans.h264";
     const char *outfilename = "1.yuv";
 
     AVPacket *pkt = av_packet_alloc();
@@ -178,8 +145,9 @@ int main(int argc, char **argv)
             data += ret;
             data_size -= ret;
 
-            if (pkt->size)
+            if (pkt->size) {
                 decode(c, frame, pkt, outfilename);
+            }
         }
     }
 

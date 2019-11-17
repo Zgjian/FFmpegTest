@@ -13,6 +13,7 @@ extern "C"
 #define INBUF_SIZE 4096
 
 static AVCodecContext *dec_ctx;
+static AVCodecParserContext *parser;
 static AVCodecContext *enc_ctx;
 static AVPacket *enc_pkt;
 
@@ -21,8 +22,8 @@ static void encode(AVCodecContext *enc_ctx, AVFrame *frame, AVPacket *pkt)
     int ret;
 
     /* send the frame to the encoder */
-    //if (frame)
-    //    printf("Send frame %3"PRId64"\n", frame->pts);
+    if (frame)
+        printf("Send frame %3" PRId64 "\n", frame->pts);
 
     ret = avcodec_send_frame(enc_ctx, frame);
     if (ret < 0) {
@@ -39,7 +40,7 @@ static void encode(AVCodecContext *enc_ctx, AVFrame *frame, AVPacket *pkt)
             exit(1);
         }
 
-        //printf("Write packet %3"PRId64" (size=%5d)\n", dec_pkt->pts, dec_pkt->size);
+        printf("Write packet %3" PRId64 " (size=%5d)\n", pkt->pts, pkt->size);
         
         FILE *fp = fopen("1111.h264", "ab+");
         fwrite(pkt->data, pkt->size, 1, fp);
@@ -52,7 +53,6 @@ static void encode(AVCodecContext *enc_ctx, AVFrame *frame, AVPacket *pkt)
 
 static void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVPacket *pkt, const char *filename)
 {
-    char buf[1024];
     int ret;
 
     ret = avcodec_send_packet(dec_ctx, pkt);
@@ -105,13 +105,13 @@ static void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVPacket *pkt, const
 
 int InitDecoder()
 {
-    const AVCodec *decoder = avcodec_find_decoder(AV_CODEC_ID_H264);
+    const AVCodec *decoder = avcodec_find_decoder(AV_CODEC_ID_MPEG2VIDEO);
     if (!decoder) {
         fprintf(stderr, "Codec not found decoder\n");
         return -1;
     }
 
-    AVCodecParserContext *parser = av_parser_init(decoder->id);
+    parser = av_parser_init(decoder->id);
     if (!parser) {
         fprintf(stderr, "parser not found\n");
         return -1;
@@ -132,7 +132,7 @@ int InitDecoder()
     return 0;
 }
 
-int InitEncoder()
+int InitEncoder(int width, int height)
 {
     const AVCodec *encoder = avcodec_find_encoder(AV_CODEC_ID_H264);
     if (!encoder) {
@@ -148,13 +148,13 @@ int InitEncoder()
 
     enc_pkt = av_packet_alloc();
     if (!enc_pkt)
-        exit(1);
+        return -1;
 
     /* put sample parameters */
     enc_ctx->bit_rate = 400000;
     /* resolution must be a multiple of two */
-    enc_ctx->width = 352;
-    enc_ctx->height = 288;
+    enc_ctx->width = width;
+    enc_ctx->height = height;
     /* frames per second */
     enc_ctx->time_base = AVRational{ 1, 25 };
     enc_ctx->framerate = AVRational{ 25, 1 };
@@ -163,18 +163,18 @@ int InitEncoder()
     enc_ctx->max_b_frames = 1;
     enc_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
 
-    av_opt_set(enc_ctx->priv_data, "preset", "slow", 0);
+    av_opt_set(enc_ctx->priv_data, "preset", "placebo", 0);
 
     int ret = avcodec_open2(enc_ctx, encoder, NULL);
     if (ret < 0) {
-        fprintf(stderr, "Could not open codec: %s\n");
-        exit(1);
+        fprintf(stderr, "Could not open encoder\n");
+        return -1;
     }
 }
 
 int main(int argc, char **argv)
 {
-    const char *filename = "111.h264";
+    const char *filename = "oceans.mp4";
     const char *outfilename = "1.yuv";
 
     AVPacket *dec_pkt = av_packet_alloc();
@@ -187,6 +187,11 @@ int main(int argc, char **argv)
     memset(inbuf + INBUF_SIZE, 0, AV_INPUT_BUFFER_PADDING_SIZE);
 
     int ret = InitDecoder();
+    if (ret != 0) {
+        return -1;
+    }
+
+    ret = InitEncoder(960, 400);
     if (ret != 0) {
         return -1;
     }
