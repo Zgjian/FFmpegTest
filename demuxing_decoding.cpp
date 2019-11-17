@@ -127,21 +127,21 @@ static int decode_packet(int *got_frame, int cached)
         decoded = FFMIN(ret, pkt.size);
 
         if (*got_frame) {
-            size_t unpadded_linesize = frame->nb_samples * 
+            size_t unpadded_linesize = frame->nb_samples *
                 av_get_bytes_per_sample(static_cast<AVSampleFormat>(frame->format));
             printf("audio_frame%s n:%d nb_samples:%d pts:%s\n",
                 cached ? "(cached)" : "",
                 audio_frame_count++, frame->nb_samples/*,
                 av_ts2timestr(frame->pts, &audio_dec_ctx->time_base)*/);
 
-            /* Write the raw audio data samples of the first plane. This works
-             * fine for packed formats (e.g. AV_SAMPLE_FMT_S16). However,
-             * most audio decoders output planar audio, which uses a separate
-             * plane of audio samples for each channel (e.g. AV_SAMPLE_FMT_S16P).
-             * In other words, this code will write only the first audio channel
-             * in these cases.
-             * You should use libswresample or libavfilter to convert the frame
-             * to packed data. */
+                /* Write the raw audio data samples of the first plane. This works
+                 * fine for packed formats (e.g. AV_SAMPLE_FMT_S16). However,
+                 * most audio decoders output planar audio, which uses a separate
+                 * plane of audio samples for each channel (e.g. AV_SAMPLE_FMT_S16P).
+                 * In other words, this code will write only the first audio channel
+                 * in these cases.
+                 * You should use libswresample or libavfilter to convert the frame
+                 * to packed data. */
             fwrite(frame->extended_data[0], 1, unpadded_linesize, audio_dst_file);
         }
     }
@@ -154,8 +154,7 @@ static int decode_packet(int *got_frame, int cached)
     return decoded;
 }
 
-static int open_codec_context(int *stream_idx,
-    AVCodecContext **dec_ctx, AVFormatContext *fmt_ctx, enum AVMediaType type)
+static int open_codec_context(int *stream_idx, AVCodecContext **dec_ctx, AVFormatContext *fmt_ctx, enum AVMediaType type)
 {
     int ret, stream_index;
     AVStream *st;
@@ -208,8 +207,7 @@ static int open_codec_context(int *stream_idx,
     return 0;
 }
 
-static int get_format_from_sample_fmt(const char **fmt,
-    enum AVSampleFormat sample_fmt)
+static int get_format_from_sample_fmt(const char **fmt, enum AVSampleFormat sample_fmt)
 {
     int i;
     struct sample_fmt_entry {
@@ -252,9 +250,9 @@ int main(int argc, char **argv)
         //exit(1);
     }
     //if (argc == 5 && !strcmp(argv[1], "-refcount")) {
-        refcount = 1;
-        //argv++;
-    //}
+    refcount = 1;
+    //argv++;
+//}
     src_filename = "oceans.mp4";
     video_dst_filename = "oceans.yuv";
     audio_dst_filename = "oceans.aac";
@@ -285,8 +283,7 @@ int main(int argc, char **argv)
         width = video_dec_ctx->width;
         height = video_dec_ctx->height;
         pix_fmt = video_dec_ctx->pix_fmt;
-        ret = av_image_alloc(video_dst_data, video_dst_linesize,
-            width, height, pix_fmt, 1);
+        ret = av_image_alloc(video_dst_data, video_dst_linesize, width, height, pix_fmt, 1);
         if (ret < 0) {
             fprintf(stderr, "Could not allocate raw video buffer\n");
             goto end;
