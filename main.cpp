@@ -1,210 +1,134 @@
-#include <stdbool.h>
+/*
+ * Copyright (c) 2014 Stefano Sabatini
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
+ /**
+  * @file
+  * libavformat AVIOContext API example.
+  *
+  * Make libavformat demuxer access media content through a custom
+  * AVIOContext read callback.
+  * @example avio_reading.c
+  */
+
 extern "C" {
-#ifndef __STDC_CONSTANT_MACROS
-#define __STDC_CONSTANT_MACROS
-#endif // !__STDC_CONSTANT_MACROS
-
-#include <libavutil/timestamp.h>
+#include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
-#include <libavutil/time.h>
+#include <libavformat/avio.h>
+#include <libavutil/file.h>
 }
-#include <iostream>
-#include <string>
 
-using namespace std;
+struct buffer_data {
+    uint8_t *ptr;
+    size_t size; ///< size left in the buffer
+};
 
-
-// ffmpeg -re -i tnhaoxc.flv -c copy -f flv rtmp://192.168.0.104/live
-// ffmpeg -i rtmp://192.168.0.104/live -c copy tnlinyrx.flv
-// ./streamer tnhaoxc.flv rtmp://192.168.0.104/live
-// ./streamer rtmp://192.168.0.104/live tnhaoxc.flv
-int main(int argc, char **argv)
+static int read_packet(void *opaque, uint8_t *buf, int buf_size)
 {
-    AVOutputFormat *ofmt = NULL;
-    AVFormatContext *ifmt_ctx = NULL, *ofmt_ctx = NULL;
-    AVPacket pkt;
-    const char *in_filename, *out_filename;
-    int ret, i;
-    int stream_index = 0;
-    int *stream_mapping = NULL;
-    int stream_mapping_size = 0;
+    struct buffer_data *bd = (struct buffer_data *)opaque;
+    buf_size = FFMIN(buf_size, bd->size);
 
-    if (argc < 3) {
-        printf("usage: %s input output\n"
-            "API example program to remux a media file with libavformat and libavcodec.\n"
-            "The output format is guessed according to the file extension.\n"
-            "\n", argv[0]);
+    if (!buf_size)
+        return AVERROR_EOF;
+    printf("ptr:%p size:%zu\n", bd->ptr, bd->size);
+
+    /* copy internal buffer data to buf */
+    memcpy(buf, bd->ptr, buf_size);
+    bd->ptr += buf_size;
+    bd->size -= buf_size;
+
+    return buf_size;
+}
+
+int main(int argc, char *argv[])
+{
+    AVFormatContext *fmt_ctx = NULL;
+    AVIOContext *avio_ctx = NULL;
+    uint8_t *buffer = NULL, *avio_ctx_buffer = NULL;
+    size_t buffer_size, avio_ctx_buffer_size = 4096;
+    const char *input_filename = "oceans.mp4";
+    int ret = 0;
+    struct buffer_data bd = { 0 };
+
+    if (argc != 2) {
+        fprintf(stderr, "usage: %s input_file\n"
+            "API example program to show how to read from a custom buffer "
+            "accessed through AVIOContext.\n", argv[0]);
         //return 1;
     }
+    //input_filename = "oceans.mp4";
 
-    in_filename = "oceans.mp4";
-    out_filename = "rtmp://127.0.0.1/live/2";
-
-    // 1. 打开输入
-    // 1.1 读取文件头，获取封装格式相关信息
-    if ((ret = avformat_open_input(&ifmt_ctx, in_filename, 0, 0)) < 0) {
-        printf("Could not open input file '%s'", in_filename);
-        //goto end;
-        return -1;
-    }
-
-    // 1.2 解码一段数据，获取流相关信息
-    if ((ret = avformat_find_stream_info(ifmt_ctx, 0)) < 0) {
-        printf("Failed to retrieve input stream information");
-        //goto end;
-        return -1;
-    }
-
-    av_dump_format(ifmt_ctx, 0, in_filename, 0);
-
-    // 2. 打开输出
-    // 2.1 分配输出ctx
-    bool push_stream = false;
-    string ofmt_name;
-    if (strstr(out_filename, "rtmp://") != NULL) {
-        push_stream = true;
-        ofmt_name = "flv";
-    }
-    else if (strstr(out_filename, "udp://") != NULL) {
-        push_stream = true;
-        ofmt_name = "mpegts";
-    }
-    else {
-        push_stream = false;
-        ofmt_name = "";
-    }
-    avformat_alloc_output_context2(&ofmt_ctx, NULL, ofmt_name.c_str(), out_filename);
-    if (!ofmt_ctx) {
-        printf("Could not create output context\n");
-        ret = AVERROR_UNKNOWN;
+    /* slurp file content into buffer */
+    ret = av_file_map(input_filename, &buffer, &buffer_size, 0, NULL);
+    if (ret < 0)
         goto end;
-    }
 
-    stream_mapping_size = ifmt_ctx->nb_streams;
-    stream_mapping = (int*)av_mallocz_array(stream_mapping_size, sizeof(*stream_mapping));
-    if (!stream_mapping) {
+    /* fill opaque structure used by the AVIOContext read callback */
+    bd.ptr = buffer;
+    bd.size = buffer_size;
+
+    if (!(fmt_ctx = avformat_alloc_context())) {
         ret = AVERROR(ENOMEM);
         goto end;
     }
 
-    ofmt = ofmt_ctx->oformat;
-
-    AVRational frame_rate;
-    double duration;
-
-    for (i = 0; i < ifmt_ctx->nb_streams; i++) {
-        AVStream *out_stream;
-        AVStream *in_stream = ifmt_ctx->streams[i];
-        AVCodecParameters *in_codecpar = in_stream->codecpar;
-
-        if (in_codecpar->codec_type != AVMEDIA_TYPE_AUDIO &&
-            in_codecpar->codec_type != AVMEDIA_TYPE_VIDEO &&
-            in_codecpar->codec_type != AVMEDIA_TYPE_SUBTITLE) {
-            stream_mapping[i] = -1;
-            continue;
-        }
-
-        if (push_stream && (in_codecpar->codec_type == AVMEDIA_TYPE_VIDEO)) {
-            frame_rate = av_guess_frame_rate(ifmt_ctx, in_stream, NULL);
-            duration = (frame_rate.num && frame_rate.den ? av_q2d(AVRational{ frame_rate.den, frame_rate.num }) : 0);
-        }
-
-        stream_mapping[i] = stream_index++;
-
-        // 2.2 将一个新流(out_stream)添加到输出文件(ofmt_ctx)
-        out_stream = avformat_new_stream(ofmt_ctx, NULL);
-        if (!out_stream) {
-            printf("Failed allocating output stream\n");
-            ret = AVERROR_UNKNOWN;
-            goto end;
-        }
-
-        // 2.3 将当前输入流中的参数拷贝到输出流中
-        ret = avcodec_parameters_copy(out_stream->codecpar, in_codecpar);
-        if (ret < 0) {
-            printf("Failed to copy codec parameters\n");
-            goto end;
-        }
-        out_stream->codecpar->codec_tag = 0;
+    avio_ctx_buffer = (uint8_t*)av_malloc(avio_ctx_buffer_size);
+    if (!avio_ctx_buffer) {
+        ret = AVERROR(ENOMEM);
+        goto end;
     }
-    av_dump_format(ofmt_ctx, 0, out_filename, 1);
-
-    if (!(ofmt->flags & AVFMT_NOFILE)) {    // TODO: 研究AVFMT_NOFILE标志
-        // 2.4 创建并初始化一个AVIOContext，用以访问URL(out_filename)指定的资源
-        ret = avio_open(&ofmt_ctx->pb, out_filename, AVIO_FLAG_WRITE);
-        if (ret < 0) {
-            printf("Could not open output file '%s'", out_filename);
-            goto end;
-        }
+    avio_ctx = avio_alloc_context(avio_ctx_buffer, avio_ctx_buffer_size,
+        0, &bd, &read_packet, NULL, NULL);
+    if (!avio_ctx) {
+        ret = AVERROR(ENOMEM);
+        goto end;
     }
+    fmt_ctx->pb = avio_ctx;
 
-    // 3. 数据处理
-    // 3.1 写输出文件头
-    ret = avformat_write_header(ofmt_ctx, NULL);
+    ret = avformat_open_input(&fmt_ctx, NULL, NULL, NULL);
     if (ret < 0) {
-        printf("Error occurred when opening output file\n");
+        fprintf(stderr, "Could not open input\n");
         goto end;
     }
 
-    while (1) {
-        AVStream *in_stream, *out_stream;
-
-        // 3.2 从输出流读取一个packet
-        ret = av_read_frame(ifmt_ctx, &pkt);
-        if (ret < 0) {
-            break;
-        }
-
-        in_stream = ifmt_ctx->streams[pkt.stream_index];
-        if (pkt.stream_index >= stream_mapping_size ||
-            stream_mapping[pkt.stream_index] < 0) {
-            av_packet_unref(&pkt);
-            continue;
-        }
-
-        int codec_type = in_stream->codecpar->codec_type;
-        if (push_stream && (codec_type == AVMEDIA_TYPE_VIDEO)) {
-            av_usleep((int64_t)(duration*AV_TIME_BASE));
-        }
-
-        pkt.stream_index = stream_mapping[pkt.stream_index];
-        out_stream = ofmt_ctx->streams[pkt.stream_index];
-
-        /* copy packet */
-        // 3.3 更新packet中的pts和dts
-        // 关于AVStream.time_base(容器中的time_base)的说明：
-        // 输入：输入流中含有time_base，在avformat_find_stream_info()中可取到每个流中的time_base
-        // 输出：avformat_write_header()会根据输出的封装格式确定每个流的time_base并写入文件中
-        // AVPacket.pts和AVPacket.dts的单位是AVStream.time_base，不同的封装格式AVStream.time_base不同
-        // 所以输出文件中，每个packet需要根据输出封装格式重新计算pts和dts
-        av_packet_rescale_ts(&pkt, in_stream->time_base, out_stream->time_base);
-        pkt.pos = -1;
-
-        // 3.4 将packet写入输出
-        ret = av_interleaved_write_frame(ofmt_ctx, &pkt);
-        if (ret < 0) {
-            printf("Error muxing packet\n");
-            break;
-        }
-        av_packet_unref(&pkt);
+    ret = avformat_find_stream_info(fmt_ctx, NULL);
+    if (ret < 0) {
+        fprintf(stderr, "Could not find stream information\n");
+        goto end;
     }
 
-    // 3.5 写输出文件尾
-    av_write_trailer(ofmt_ctx);
+    av_dump_format(fmt_ctx, 0, input_filename, 0);
 
 end:
-    avformat_close_input(&ifmt_ctx);
+    avformat_close_input(&fmt_ctx);
 
-    /* close output */
-    if (ofmt_ctx && !(ofmt->flags & AVFMT_NOFILE)) {
-        avio_closep(&ofmt_ctx->pb);
-    }
-    avformat_free_context(ofmt_ctx);
+    /* note: the internal buffer could have changed, and be != avio_ctx_buffer */
+    if (avio_ctx)
+        av_freep(&avio_ctx->buffer);
+    avio_context_free(&avio_ctx);
 
-    av_freep(&stream_mapping);
+    av_file_unmap(buffer, buffer_size);
 
-    if (ret < 0 && ret != AVERROR_EOF) {
-        //printf("Error occurred: %s\n", av_err2str(ret));
+    if (ret < 0) {
+        //fprintf(stderr, "Error occurred: %s\n", av_err2str(ret));
         return 1;
     }
 

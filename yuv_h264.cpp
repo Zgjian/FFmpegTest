@@ -93,9 +93,14 @@ static void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVPacket *pkt, const
             memcpy(yuv_data.get() + frame->width / 2 * k + y_size * 5 / 4, frame->data[2] + frame->linesize[2] * k, frame->width / 2);
 
 
-        FILE *fp_out = fopen(filename, "ab+");
-        fwrite(yuv_data.get(), yuv_size, 1, fp_out);
-        fclose(fp_out);
+        //FILE *fp_out = fopen(filename, "ab+");
+        //fwrite(yuv_data.get(), yuv_size, 1, fp_out);
+        //fclose(fp_out);
+
+
+        // Zgj++
+        static int i = 0;
+        frame->pts = i++;
 
 
         // encode
@@ -105,7 +110,7 @@ static void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVPacket *pkt, const
 
 int InitDecoder()
 {
-    const AVCodec *decoder = avcodec_find_decoder(AV_CODEC_ID_MPEG2VIDEO);
+    const AVCodec *decoder = avcodec_find_decoder(AV_CODEC_ID_H264);
     if (!decoder) {
         fprintf(stderr, "Codec not found decoder\n");
         return -1;
@@ -170,11 +175,12 @@ int InitEncoder(int width, int height)
         fprintf(stderr, "Could not open encoder\n");
         return -1;
     }
+    return 0;
 }
 
 int main(int argc, char **argv)
 {
-    const char *filename = "oceans.mp4";
+    const char *filename = "oceans.h264";
     const char *outfilename = "1.yuv";
 
     AVPacket *dec_pkt = av_packet_alloc();
@@ -208,9 +214,6 @@ int main(int argc, char **argv)
         fprintf(stderr, "Could not allocate video frame\n");
         exit(1);
     }
-
-
-
 
 
     uint8_t *data;
